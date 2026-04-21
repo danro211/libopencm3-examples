@@ -38,6 +38,9 @@
 #define LCC LREDF_PORT, LREDF
 #define LUP LREDB_PORT, LREDB
 
+volatile unsigned int servo_ms = 0;
+volatile unsigned char servo_state = 0;
+
 /*
   Timer 1 clk frequency:
   If TIMPRE == 0: (default)
@@ -149,8 +152,8 @@ static void tim_setup(void)
 	timer_set_period(TIM1, 13124);
 
 	/* Set the initual output compare value for OC1. */
-	timer_set_oc_value(TIM1, TIM_OC1, 1313); // no usar los negativos
-	// 5% 656 -  7.5% 984  -  10% 1313 
+	timer_set_oc_value(TIM1, TIM_OC1, 0); // no usar los negativos
+	// inicializar en 0% 
 
     /* Disable outputs. */
     //timer_enable_oc_output(TIM1, TIM_OC1);
@@ -194,6 +197,75 @@ void tim1_up_tim10_isr(void)
 }
 
 
+static void tim2_setup(void)
+{
+	rcc_periph_clock_enable(RCC_TIM2);
+	nvic_enable_irq(NVIC_TIM2_IRQ);
+	rcc_periph_reset_pulse(RST_TIM2);
+
+	timer_set_mode(TIM2, TIM_CR1_CKD_CK_INT,
+	               TIM_CR1_CMS_EDGE, TIM_CR1_DIR_UP);
+
+	timer_set_prescaler(TIM2, 8399);
+	timer_set_period(TIM2, 9);
+
+	timer_disable_preload(TIM2);
+	timer_continuous_mode(TIM2);
+
+	timer_enable_irq(TIM2, TIM_DIER_UIE);
+	timer_enable_counter(TIM2);
+}
+
+
+void tim2_isr(void)
+{
+	timer_clear_flag(TIM2, TIM_SR_UIF);
+	servo_ms++;
+
+	switch (servo_state) {
+	case 0:
+		if (servo_ms >= 2000) {
+			timer_set_oc_value(TIM1, TIM_OC1, 1247);   // 10% angular
+			servo_state = 1;
+			servo_ms = 0;
+		}
+		break;
+
+	case 1:
+		if (servo_ms >= 1000) {
+			timer_set_oc_value(TIM1, TIM_OC1, 656);    // 100% angular
+			servo_state = 2;
+			servo_ms = 0;
+		}
+		break;
+
+	case 2:
+		if (servo_ms >= 3000) {
+			timer_set_oc_value(TIM1, TIM_OC1, 984);    // 50% angular
+			servo_state = 3;
+			servo_ms = 0;
+		}
+		break;
+
+	case 3:
+		if (servo_ms >= 1000) {
+			timer_set_oc_value(TIM1, TIM_OC1, 1247);   // 10% angular
+			servo_state = 4;
+			servo_ms = 0;
+		}
+		break;
+
+	case 4:
+		if (servo_ms >= 5000) {
+			timer_set_oc_value(TIM1, TIM_OC1, 1313);   // 0% angular
+			servo_state = 0;
+			servo_ms = 0;
+		}
+		break;
+	}
+}
+
+
 int main(void)
 {
 	int i;
@@ -201,6 +273,7 @@ int main(void)
 	clock_setup();
 	gpio_setup();
     tim_setup();
+    tim2_setup();
 
 	/* Set two LEDs for wigwag effect when toggling. */
 	gpio_set(LGREENF_PORT, LGREENF);
